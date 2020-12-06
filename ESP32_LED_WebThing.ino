@@ -1,4 +1,5 @@
-#define LARGE_JSON_BUFFERS 1
+#define LARGE_JSON_DOCUMENT_SIZE 8192
+#define SMALL_JSON_DOCUMENT_SIZE 2048
 
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
@@ -6,8 +7,8 @@
 #include <WebThingAdapter.h>
 
 // Wifi
-const char *ssid = "*****";
-const char *password = "******";
+const char *ssid = "";
+const char *password = "";
 bool connected = false;
 
 // Led information
@@ -24,12 +25,11 @@ WebThingAdapter *adapter;
 // Declaring the webthing device, and its properties
 const char *deviceTypes[] = {"Light", "OnOffSwitch", "ColorControl", nullptr};
 // Device
-ThingDevice device("StormTrooperLamp", "Controllable rgb lamp, there are opetions to dim and change color on this lamp.", deviceTypes);
+ThingDevice device("StormTrooperLamp", "Controllable RGB lamp.", deviceTypes);
 // Property
-ThingProperty deviceOn("on", "Whether the led is turned on or off", BOOLEAN, "OnOffProperty");
-ThingProperty deviceLevel("level", "The brightness of the light from 0-255", NUMBER, "BrightnessProperty");
-ThingProperty deviceColor("color", "The color of light in RGB", STRING, "ColorProperty");
-ThingProperty remberColor("no", "Whether to rember the given color on next startup", BOOLEAN, "BooleanProperty");
+ThingProperty deviceOn("On/Off", "Whether the led is turned on or off", BOOLEAN, "OnOffProperty");
+ThingProperty deviceBrightness("Brightness", "The brightness of the light from 0-100", INTEGER, "BrightnessProperty");
+ThingProperty deviceColor("Color", "The color of light in RGB", STRING, "ColorProperty");
 
 // ### Functions to be used ###
 
@@ -54,20 +54,19 @@ void ledBlink(uint8_t wait, uint16_t ledNumber, uint32_t color) {
   strip.show();
 }
 
-void update(String *color) {
-  int red, green, blue;
-  if (color && (color->length() == 7) && color->charAt(0) == '#') {
-    const char *hex = 1 + (color->c_str()); // skip leading '#'
-    sscanf(0 + hex, "%2x", &red);
-    sscanf(2 + hex, "%2x", &green);
-    sscanf(4 + hex, "%2x", &blue);
+// Set/update brightness
+void updateBrightness(int brightnessPercent){
+  int brightness = map(brightnessPercent, 0, 100, 0, 255);
+  if (brightness < 0 || brightness > 255)
+  {
+    Serial.println("Error, value out of range!");
+    return;
   }
-
-  if (red && green && blue) {
-    uint32_t rgbcolor = strip.gamma32(strip.Color(red, green, blue));
-    strip.fill(rgbcolor);
+  if (strip.getBrightness() != brightness)
+  {
+    strip.setBrightness(brightness);
     strip.show();
-  }  
+  }
 }
 
 // Test Wheel and rainbow can be deleted
@@ -129,7 +128,7 @@ void setup() {
   if(WiFi.status() == WL_CONNECTED) {
     connected = true;
     const uint32_t ledFillColor = strip.Color(22, 181, 147);
-    for(int i=0; i < 4; i++) {
+    for(int i=0; i < 3; i++) {
       strip.fill(ledFillColor);
       strip.show();
       delay(90);
@@ -148,15 +147,14 @@ void setup() {
     adapter = new WebThingAdapter("rgbLamp", WiFi.localIP());
 
     // Setting values on the properties
-    deviceLevel.minimum = 0;
-    deviceLevel.maximum = 255;
-    deviceLevel.unit = "brightness";
+    deviceBrightness.minimum = 0;
+    deviceBrightness.maximum = 100;
+    deviceBrightness.unit = "percent";
 
     // Adding properties
     device.addProperty(&deviceOn);
-    device.addProperty(&deviceLevel);
+    device.addProperty(&deviceBrightness);
     device.addProperty(&deviceColor);
-    device.addProperty(&remberColor);
 
     // Adding device
     adapter->addDevice(&device);
@@ -188,23 +186,31 @@ void setup() {
 
   delay(500);
 
+  
+  
   strip.show();
 }
+
+bool lastOnOff = true;
+int lastPrecent = 0;
 
 // Main code loop
 void loop(){
   adapter->update();
-
-  // On/Off
-  if (deviceOn.getValue().boolean) {
-    strip.setBrightness(deviceLevel.getValue().integer);
-    strip.show();
-  }else {
-    strip.setBrightness(0);
-    strip.show();
-  }
   
-  // Set color
-  update(deviceColor.getValue().string);
-
+  // On/Off
+  if (deviceOn.getValue().boolean != lastOnOff) {
+    Serial.println("On/Off");
+    const uint32_t testColor = strip.Color(0, 255, 0);
+    const uint32_t testColor2 = strip.Color(0, 0, 0);
+    deviceOn.getValue().boolean ? strip.fill(testColor) : strip.fill(testColor2);
+    strip.show();
+    lastOnOff = deviceOn.getValue().boolean;
+  }
+  if (deviceBrightness.getValue().integer != lastPrecent)
+  {
+    // Kan ikke bruge brightness til at dimme
+    lastPrecent = deviceBrightness.getValue().integer;
+    updateBrightness(deviceBrightness.getValue().integer);
+  }
 }
