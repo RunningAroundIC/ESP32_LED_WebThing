@@ -1,5 +1,4 @@
-#define LARGE_JSON_DOCUMENT_SIZE 8192
-#define SMALL_JSON_DOCUMENT_SIZE 2048
+#define LARGE_JSON_BUFFERS 1
 
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
@@ -26,7 +25,7 @@ WebThingAdapter *adapter;
 // Declaring the webthing device, and its properties
 const char *deviceTypes[] = {"Light", "OnOffSwitch", "ColorControl", nullptr};
 // Device
-ThingDevice device("StormTrooperLamp", "Stormtrooper lamp.", deviceTypes);
+ThingDevice device("StormTrooperLamp", "Stormtrooper lamp", deviceTypes);
 // Property
 ThingProperty deviceOn("On/Off", "Whether the led is turned on or off", BOOLEAN, "OnOffProperty");
 ThingProperty deviceBrightness("Brightness", "The brightness of the light from 0-100", INTEGER, "BrightnessProperty");
@@ -109,11 +108,11 @@ void updateBrightness(int brightnessPercent, String color){
   {
     Serial.println("Error, value out of range, or no color given!");
     return;
-  }
-  RGB rgb = colorConverter(color);
+  }  
 
   if (strip.getBrightness() != brightness)
   {
+    RGB rgb = colorConverter(color);
     const uint32_t ledcolor = strip.gamma32(strip.Color(rgb.r, rgb.g, rgb.b));
 
     strip.clear();
@@ -177,7 +176,7 @@ void setup() {
     Serial.println(WiFi.localIP());
 
     // init webthings adaptor
-    adapter = new WebThingAdapter("rgbLamp", WiFi.localIP());
+    adapter = new WebThingAdapter("stormTrooperLamp", WiFi.localIP());
 
     // Setting values on the properties
     ThingPropertyValue on;
