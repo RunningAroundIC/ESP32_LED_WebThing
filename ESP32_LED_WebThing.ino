@@ -14,7 +14,8 @@ bool connected = false;
 // Led information
 const int ledPin = 13;
 const int ledCount = 12;
-const int brightness = 50;
+const int brightness = 51;
+String defaultColor = "#00ff00";
 
 // Declare NeoPixel strip object
 Adafruit_NeoPixel strip(ledCount, ledPin, NEO_GRB + NEO_KHZ800);
@@ -25,13 +26,30 @@ WebThingAdapter *adapter;
 // Declaring the webthing device, and its properties
 const char *deviceTypes[] = {"Light", "OnOffSwitch", "ColorControl", nullptr};
 // Device
-ThingDevice device("StormTrooperLamp", "Controllable RGB lamp.", deviceTypes);
+ThingDevice device("StormTrooperLamp", "Stormtrooper lamp.", deviceTypes);
 // Property
 ThingProperty deviceOn("On/Off", "Whether the led is turned on or off", BOOLEAN, "OnOffProperty");
 ThingProperty deviceBrightness("Brightness", "The brightness of the light from 0-100", INTEGER, "BrightnessProperty");
-ThingProperty deviceColor("Color", "The color of light in RGB", STRING, "ColorProperty");
+ThingProperty deviceColor("Color", "The color of light", STRING, "ColorProperty");
 
 // ### Functions to be used ###
+
+struct RGB{
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+};
+
+struct RGB
+// Convert HEX to RGB
+colorConverter(String color){
+  int hexValue = (int) strtol( &color[1], NULL, 16);
+  struct RGB rgbColor;
+  rgbColor.r = hexValue >> 16;
+  rgbColor.g = hexValue >> 8 & 0xFF;
+  rgbColor.b = hexValue & 0xFF;
+  return (rgbColor);
+}
 
 // A startup "effect" each led will glow green for N miliseconds, and then turn off.
 void ledStartup(uint8_t wait) {
@@ -54,47 +72,62 @@ void ledBlink(uint8_t wait, uint16_t ledNumber, uint32_t color) {
   strip.show();
 }
 
-// Set/update brightness
-void updateBrightness(int brightnessPercent){
-  int brightness = map(brightnessPercent, 0, 100, 0, 255);
-  if (brightness < 0 || brightness > 255)
+// Get latest set color as RGB
+const uint32_t getColor(String color){
+  if (color.isEmpty())
   {
-    Serial.println("Error, value out of range!");
+    Serial.println("Error, getting color failed, no color given!");
+    const uint32_t errorColor = strip.gamma32(strip.Color(255, 0, 0));
+    return errorColor;
+  }
+  RGB rgb = colorConverter(color);
+
+  const uint32_t convertedColor = strip.gamma32(strip.Color(rgb.r, rgb.g, rgb.b));
+
+  return convertedColor;
+}
+
+// Update color
+void updateColor(String color){
+  if (color.isEmpty())
+  {
+    Serial.println("Error, no color given!");
     return;
   }
+  RGB rgb = colorConverter(color);
+
+  const uint32_t ledColor = strip.gamma32(strip.Color(rgb.r, rgb.g, rgb.b));
+  strip.fill(ledColor);
+  strip.show();
+}
+
+// Update brightness
+void updateBrightness(int brightnessPercent, String color){
+  int brightness = map(brightnessPercent, 0, 100, 0, 255);
+  
+  if ((brightness < 0 || brightness > 255) && color.isEmpty())
+  {
+    Serial.println("Error, value out of range, or no color given!");
+    return;
+  }
+  RGB rgb = colorConverter(color);
+
   if (strip.getBrightness() != brightness)
   {
+    const uint32_t ledcolor = strip.gamma32(strip.Color(rgb.r, rgb.g, rgb.b));
+
+    strip.clear();
+    strip.show();
+    if(!strip.canShow()){
+      delayMicroseconds(300);
+    }
     strip.setBrightness(brightness);
     strip.show();
-  }
-}
-
-// Test Wheel and rainbow can be deleted
-
-// Input a value 0 to 255 to get a color value.
-// The colours are a transition r - g - b - back to r.
-uint32_t Wheel(byte WheelPos) {
-  WheelPos = 255 - WheelPos;
-  if(WheelPos < 85) {
-    return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
-  }
-  if(WheelPos < 170) {
-    WheelPos -= 85;
-    return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
-  }
-  WheelPos -= 170;
-  return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
-}
-
-void rainbow(uint8_t wait) {
-  uint16_t i, j;
-
-  for(j=0; j<256; j++) {
-    for(i=0; i<strip.numPixels(); i++) {
-      strip.setPixelColor(i, Wheel((i+j) & 255));
+    if(!strip.canShow()){
+      delayMicroseconds(300);
     }
+    strip.fill(ledcolor);
     strip.show();
-    delay(wait);
   }
 }
 
@@ -147,9 +180,21 @@ void setup() {
     adapter = new WebThingAdapter("rgbLamp", WiFi.localIP());
 
     // Setting values on the properties
+    ThingPropertyValue on;
+    on.boolean = true;
+    deviceOn.setValue(on);
+
+    int startPercent = ((float)brightness/255)*100;
     deviceBrightness.minimum = 0;
     deviceBrightness.maximum = 100;
     deviceBrightness.unit = "percent";
+    ThingPropertyValue brightnessValue;
+    brightnessValue.integer = startPercent;
+    deviceBrightness.setValue(brightnessValue);
+
+    ThingPropertyValue colorValue;
+    colorValue.string = &defaultColor;
+    deviceColor.setValue(colorValue);
 
     // Adding properties
     device.addProperty(&deviceOn);
@@ -185,32 +230,31 @@ void setup() {
   }
 
   delay(500);
-
-  
   
   strip.show();
 }
 
-bool lastOnOff = true;
-int lastPrecent = 0;
+bool lastOnOff = false;
+String lastColor = "#00ff00";
+int lastPrecent = ((float)brightness/255)*100;
 
 // Main code loop
 void loop(){
   adapter->update();
   
-  // On/Off
   if (deviceOn.getValue().boolean != lastOnOff) {
-    Serial.println("On/Off");
-    const uint32_t testColor = strip.Color(0, 255, 0);
-    const uint32_t testColor2 = strip.Color(0, 0, 0);
-    deviceOn.getValue().boolean ? strip.fill(testColor) : strip.fill(testColor2);
+    const uint32_t off = strip.Color(0, 0, 0);
+    deviceOn.getValue().boolean ? strip.fill(getColor(lastColor)) : strip.fill(off);
     strip.show();
     lastOnOff = deviceOn.getValue().boolean;
   }
+  if (!deviceColor.getValue().string->equals(lastColor)){
+    updateColor(deviceColor.getValue().string->c_str());
+    lastColor = deviceColor.getValue().string->c_str();
+  }
   if (deviceBrightness.getValue().integer != lastPrecent)
   {
-    // Kan ikke bruge brightness til at dimme
     lastPrecent = deviceBrightness.getValue().integer;
-    updateBrightness(deviceBrightness.getValue().integer);
+    updateBrightness(deviceBrightness.getValue().integer, deviceColor.getValue().string->c_str());
   }
 }
